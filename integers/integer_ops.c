@@ -162,7 +162,7 @@ int convert_from_decimal_string(uint64_t *a, size_t n,
     shift_left(a_eight, n, 3);
     shift_left(a_two, n, 1);
     addition(a, a_eight, a_two, n);
-    __add_uint64(a, digit, n);
+    __add_uint64(a, n, digit);
   }
   return 0;
 }
