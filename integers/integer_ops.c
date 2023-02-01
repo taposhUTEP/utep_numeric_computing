@@ -17,6 +17,146 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
+#include <errno.h>
+
+/* Helper functions */
+
+/* Tries to multiply the two size_t arguments a and b.
+
+   If the product holds on a size_t variable, sets the 
+   variable pointed to by c to that product and returns a 
+   non-zero value.
+   
+   Otherwise, does not touch the variable pointed to by c and 
+   returns zero.
+
+   This implementation is kind of naive as it uses a division.
+   If performance is an issue, try to speed it up by avoiding 
+   the division while making sure that it still does the right 
+   thing (which is hard to prove).
+
+*/
+static inline int __try_size_t_multiply(size_t *c, size_t a, size_t b) {
+  size_t t, r, q, M;
+
+  /* If any of the arguments a and b is zero, everthing works just fine. */
+  if ((a == ((size_t) 0)) ||
+      (b == ((size_t) 0))) {
+    *c = a * b;
+    return 1;
+  }
+  
+  /* If both a and b are less than 2^(k/2), where k is the bitwith of 
+     a size_t, a regular multiplication is enough.
+  */
+  M = ((size_t) 1) << (((size_t) 4) * sizeof(size_t));
+  if ((a < M) && (b < M)) {
+    *c = a * b;
+    return 1;
+  }
+  
+  /* Here, neither a nor b is zero. 
+
+     We perform the multiplication, which may overflow, i.e. present
+     some modulo-behavior.
+
+  */
+  t = a * b;
+
+  /* Perform Euclidian division on t by a:
+
+     t = a * q + r
+
+     As we are sure that a is non-zero, we are sure
+     that we will not divide by zero.
+
+  */
+  q = t / a;
+  r = t % a;
+
+  /* If the rest r is non-zero, the multiplication overflowed. */
+  if (r != ((size_t) 0)) return 0;
+
+  /* Here the rest r is zero, so we are sure that t = a * q.
+
+     If q is different from b, the multiplication overflowed.
+     Otherwise we are sure that t = a * b.
+
+  */
+  if (q != b) return 0;
+  *c = t;
+  return 1;
+}
+
+static inline void __m_memset(void *s, int c, size_t m, size_t n) {
+  size_t p, i, min_m_n, max_m_n;
+  void *curr;
+
+  /* Easy case for 99.9999% of all cases */
+  if (__try_size_t_multiply(&p, m, n)) {
+    memset(s, c, p);
+    return;
+  }
+
+  /* Overflow case */
+  if (m < n) {
+    min_m_n = m;
+    max_m_n = n;
+  } else {
+    min_m_n = n;
+    max_m_n = m;
+  }
+  for (i=0,curr=s;
+       i<min_m_n;
+       i++,curr=(void *) (((char *) curr) + max_m_n)) {
+    memset(curr, c, max_m_n);
+  }
+}
+
+static inline void __m_memcpy(void *dst, const void *src, size_t m, size_t n) {
+  size_t p, i, min_m_n, max_m_n;
+  void *curr_dst;
+  const void *curr_src;
+
+  /* Easy case for 99.9999% of all cases */
+  if (__try_size_t_multiply(&p, m, n)) {
+    memcpy(dst, src, p);
+    return;
+  }
+
+  /* Overflow case */
+  if (m < n) {
+    min_m_n = m;
+    max_m_n = n;
+  } else {
+    min_m_n = n;
+    max_m_n = m;
+  }
+  for (i=0,curr_dst=dst,curr_src=src;
+       i<min_m_n;
+       i++,
+	 curr_dst=(void *) (((char *) curr_dst) + max_m_n),
+	 curr_src=(const void *) (((const char *) curr_src) + max_m_n)) {
+    memcpy(curr_dst, curr_src, max_m_n);
+  }
+}
+
+static inline void *__alloc_mem(size_t nmemb, size_t size) {
+  void *ptr;
+
+  ptr = calloc(nmemb, size);
+  if (ptr == NULL) {
+    fprintf(stderr, "Cannot allocate memory: %s\n", strerror(errno));
+    exit(1);
+  }
+  
+  return ptr;
+}
+
+static inline void __free_mem(void *ptr) {
+  free(ptr);
+}
 
 /* cout * 2^64 + s = a + b */
 static inline void __halfadder(uint64_t *cout, uint64_t *s,
@@ -149,7 +289,7 @@ void shift_left(uint64_t *a, size_t n, size_t k) {
   */
   if (k >= (n * ((size_t) 64))) {
     /* Helper function to set memory to zero */
-    memset(a, 0, n * sizeof(*a));
+    __m_memset(a, 0, n, sizeof(*a));
     return;
   }
 
@@ -214,7 +354,7 @@ void shift_right(uint64_t *a, size_t n, size_t k) {
   */
   if (k >= (n * ((size_t) 64))) {
     /* Helper function to set memory to zero */
-    memset(a, 0, n * sizeof(*a));
+    __m_memset(a, 0, n, sizeof(*a));
     return;
   }
 
@@ -272,20 +412,33 @@ int convert_from_decimal_string(uint64_t *a, size_t n,
 				const char *str) {
   const char *curr;
   uint64_t digit;
-  uint64_t a_eight[n];
-  uint64_t a_two[n];
-  uint64_t t[n];
+  uint64_t *a_eight;
+  uint64_t *a_two;
+  uint64_t *t;
  
   /* Do nothing for the empty string */
   if (str[0] == '\0') return -1;
+
+  /* Allocate memory */
+  a_eight = __alloc_mem(n, sizeof(*a_eight));
+  a_two = __alloc_mem(n, sizeof(*a_two));
+  t = __alloc_mem(n, sizeof(*t));
   
   /* Set a to zero */
-  memset(a, 0, n * sizeof(*a));
+  __m_memset(a, 0, n, sizeof(*a));
 
   /* Loop over the string */
   for (curr=str; *curr!='\0'; curr++) {
     if (!(('0' <= *curr) &&
-	  (*curr <= '9'))) return -1;
+	  (*curr <= '9'))) {
+      /* Free memory */
+      __free_mem(a_eight);
+      __free_mem(a_two);
+      __free_mem(t);
+      
+      /* Indicate failure */
+      return -1;
+    }
     digit = (uint64_t) (((int) *curr) - ((int) '0'));
 
     /* Multiply a by 10 and add in the digit 
@@ -293,13 +446,20 @@ int convert_from_decimal_string(uint64_t *a, size_t n,
        a * 10 = a * 8 + a * 2
 
     */
-    memcpy(a_eight, a, n * sizeof(*a));
-    memcpy(a_two, a, n * sizeof(*a));
+    __m_memcpy(a_eight, a, n, sizeof(*a));
+    __m_memcpy(a_two, a, n, sizeof(*a));
     shift_left(a_eight, n, 3);
     shift_left(a_two, n, 1);
     addition(t, a_eight, n, a_two, n);
     addition(a, t, n, &digit, 1);
   }
+
+  /* Free memory */
+  __free_mem(a_eight);
+  __free_mem(a_two);
+  __free_mem(t);
+
+  /* Indicate success */
   return 0;
 }
 
@@ -378,6 +538,18 @@ static inline void __multiply_digits(uint64_t *hi, uint64_t *lo,
   *lo = l;
 }
 
+/* hi * 2^64 + lo = a * b + c */
+static inline void __multiply_and_add(uint64_t *hi, uint64_t *lo,
+				      uint64_t a, uint64_t b, uint64_t c) {
+  uint64_t h, l, th, tl, cout;
+
+  __multiply_digits(&th, &tl, a, b);
+  __halfadder(&cout, &l, tl, c);
+  h = th + cout;
+  *hi = h;
+  *lo = l;
+}
+
 /* p = a * b
 
    a is on m digits
@@ -390,7 +562,19 @@ static inline void __multiplication_rectangular(uint64_t *p,
 						const uint64_t *a,
 						size_t m,
 						uint64_t b) {
-  // TODO
+  uint64_t cin, cout;
+  size_t i;
+
+  /* m is zero: nothing to do */
+  if (m == ((size_t) 0)) return;
+
+  /* Loop */
+  cin = (uint64_t) 0;
+  for (i=0;i<m;i++) {
+    __multiply_and_add(&cout, &p[i], a[i], b, cin);
+    cin = cout;
+  }
+  p[i] = cin;
 }
 
 static inline unsigned int __floor_log2_size(size_t x) {
@@ -486,24 +670,34 @@ static inline void __multiplication_square_aux1(uint64_t *p,
 						const uint64_t *b,
 						size_t m,
 						size_t t) {
-  uint64_t aa[t];
-  uint64_t bb[t];
-  uint64_t r[t + t];
+  uint64_t *aa;
+  uint64_t *bb;
+  uint64_t *r;
   
   /* Check the pre-condition */
   if (!(t > m)) return;
 
+  /* Allocate memory */
+  aa = __alloc_mem(t, sizeof(*aa));
+  bb = __alloc_mem(t, sizeof(*bb));
+  r = __alloc_mem(t, ((size_t) 2) * sizeof(*r));
+  
   /* Extend a and b to size t */
-  memcpy(aa, a, m * sizeof(*aa));
-  memset(&aa[m], 0, (t - m) * sizeof(*aa));
-  memcpy(bb, b, m * sizeof(*bb));
-  memset(&bb[m], 0, (t - m) * sizeof(*bb));
+  __m_memcpy(aa, a, m, sizeof(*aa));
+  __m_memset(&aa[m], 0, (t - m), sizeof(*aa));
+  __m_memcpy(bb, b, m, sizeof(*bb));
+  __m_memset(&bb[m], 0, (t - m), sizeof(*bb));
 
   /* Compute r = aa * bb */
   __multiplication_square(r, aa, bb, t);
 
   /* Compute the 2 * m last digits from r into p */
-  memcpy(p, r, (m + m) * sizeof(*p));
+  __m_memcpy(p, r, (m + m), sizeof(*p));
+
+  /* Free memory */
+  __free_mem(aa);
+  __free_mem(bb);
+  __free_mem(r);
 }
 
 /* Forward declaration */
@@ -534,20 +728,33 @@ static inline void __multiplication_square_aux2(uint64_t *p,
 						const uint64_t *b,
 						size_t m,
 						size_t t) {
-  uint64_t al[t];
-  uint64_t ah[m - t];
-  uint64_t bl[t];
-  uint64_t bh[m - t];
-  uint64_t hh[(m - t) + (m - t)];
-  uint64_t hl[m];
-  uint64_t lh[m];
-  uint64_t ll[t + t];
-  uint64_t hle[m + ((size_t) 1)];  /* +1 may overflow */
-  uint64_t lhe[m + ((size_t) 1)];  /* +1 may overflow */
-  uint64_t hllh[m + ((size_t) 1)]; /* +1 may overflow */
+  uint64_t *al;
+  uint64_t *ah;
+  uint64_t *bl;
+  uint64_t *bh;
+  uint64_t *hh;
+  uint64_t *hl;
+  uint64_t *lh;
+  uint64_t *ll;
+  uint64_t *hle; 
+  uint64_t *lhe; 
+  uint64_t *hllh; 
   
   /* Check the pre-condition */
   if (!(m > t)) return;
+
+  /* Allocate memory */
+  al = __alloc_mem(t, sizeof(*al));
+  ah = __alloc_mem(m - t, sizeof(*ah));
+  bl = __alloc_mem(t, sizeof(*bl));
+  bh = __alloc_mem(m - t, sizeof(*bh));
+  hh = __alloc_mem(m - t, ((size_t) 2) * sizeof(*hh));
+  hl = __alloc_mem(m, sizeof(*hl));
+  lh = __alloc_mem(m, sizeof(*lh));
+  ll = __alloc_mem(t, ((size_t) 2) * sizeof(*ll));
+  hle = __alloc_mem(m + ((size_t) 1), sizeof(*hle)); /* +1 may overflow */
+  lhe = __alloc_mem(m + ((size_t) 1), sizeof(*lhe)); /* +1 may overflow */
+  hllh = __alloc_mem(m + ((size_t) 1), sizeof(*hllh)); /* +1 may overflow */
   
   /* Cut 
 
@@ -558,10 +765,10 @@ static inline void __multiplication_square_aux2(uint64_t *p,
      b = bh * 2^(64 * t) + bl
 
   */ 
-  memcpy(al, a, t * sizeof(*al));
-  memcpy(ah, &a[t], (m - t) * sizeof(*ah));
-  memcpy(bl, b, t * sizeof(*bl));
-  memcpy(bh, &b[t], (m - t) * sizeof(*bh));
+  __m_memcpy(al, a, t, sizeof(*al));
+  __m_memcpy(ah, &a[t], (m - t), sizeof(*ah));
+  __m_memcpy(bl, b, t, sizeof(*bl));
+  __m_memcpy(bh, &b[t], (m - t), sizeof(*bh));
 
   /* Perform the 4 partial products */
   multiplication(hh, ah, m - t, bh, m - t);
@@ -570,10 +777,10 @@ static inline void __multiplication_square_aux2(uint64_t *p,
   multiplication(ll, al, t, bl, t);
 
   /* Add the middle products together */
-  memset(hle, 0, (m + ((size_t) 1)) * sizeof(*hle));
-  memcpy(hle, hl, m * sizeof(*hle));
-  memset(lhe, 0, (m + ((size_t) 1)) * sizeof(*lhe));
-  memcpy(lhe, lh, m * sizeof(*lhe));
+  __m_memset(hle, 0, (m + ((size_t) 1)), sizeof(*hle));
+  __m_memcpy(hle, hl, m, sizeof(*hle));
+  __m_memset(lhe, 0, (m + ((size_t) 1)), sizeof(*lhe));
+  __m_memcpy(lhe, lh, m, sizeof(*lhe));
   addition(hllh, hle, m + ((size_t) 1), lhe, m + ((size_t) 1));
 
   /* Put everything back into the result */
@@ -582,6 +789,19 @@ static inline void __multiplication_square_aux2(uint64_t *p,
 			      hh, (m - t) + (m - t), t + t,
 			      hllh, m + ((size_t) 1), t,
 			      ll, t + t);
+
+  /* Free memory */
+  __free_mem(al);
+  __free_mem(ah);
+  __free_mem(bl);
+  __free_mem(bh);
+  __free_mem(hh);
+  __free_mem(hl);
+  __free_mem(lh);
+  __free_mem(ll);
+  __free_mem(hle);
+  __free_mem(lhe);
+  __free_mem(hllh);
 }
 
 /* p = a * b
@@ -629,10 +849,10 @@ static inline void __multiplication_square(uint64_t *p,
   /* Here 2^k = t < m < 2^(k + 1) 
 
      Compute T, the largest power of 2 such that
-     2 * T is representable on a size_t.
+     32 * T is representable on a size_t.
 
   */
-  T = ((~((size_t) 0)) >> 2) + ((size_t) 1);
+  T = ((~((size_t) 0)) >> 6) + ((size_t) 1);
 
   /* If t is less than T, we can compute 2 * t (and 4 * t) without
      overflowing. 
@@ -676,24 +896,32 @@ static inline void __multiplication_aux(uint64_t *p,
 					size_t m,
 					const uint64_t *b,
 					size_t n) {
-  uint64_t t[n];
-  uint64_t r[n+n]; /* n+n may overflow */
+  uint64_t *t;
+  uint64_t *r;
   
   /* Handle preconditions */
   if (!(((size_t) 2) <= m)) return;
   if (!(m < n)) return;
 
+  /* Allocate memory */
+  t = __alloc_mem(n, sizeof(*t));
+  r = __alloc_mem(n, ((size_t) 2) * sizeof(*r));
+  
   /* Copy a into t */
-  memcpy(t, a, m * sizeof(*t));
+  __m_memcpy(t, a, m, sizeof(*t));
 
   /* Set upper part of t to zero */
-  memset(&t[m], 0, (n - m) * sizeof(*t));
+  __m_memset(&t[m], 0, (n - m), sizeof(*t));
 
   /* Now t and b have the same size n */
   __multiplication_square(r, t, b, n);
 
   /* Copy low part of r into p */
-  memcpy(p, r, (m + n) * sizeof(*p));
+  __m_memcpy(p, r, (m + n), sizeof(*p));
+
+  /* Free memory */
+  __free_mem(t);
+  __free_mem(r);
 }
 
 /* p = a * b
