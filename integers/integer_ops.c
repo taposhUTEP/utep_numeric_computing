@@ -19,6 +19,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include "integer_ops.h"
 
 /* Helper functions */
 
@@ -700,12 +701,6 @@ static inline void __multiplication_square_aux1(uint64_t *p,
   __free_mem(r);
 }
 
-/* Forward declaration */
-void multiplication(uint64_t *p,
-		    const uint64_t *a, size_t m,
-		    const uint64_t *b, size_t n);
-
-
 /* p = a * b
 
    a is on m digits
@@ -980,4 +975,255 @@ void multiplication(uint64_t *p,
   */
   __multiplication_aux(p, a, m, b, n);
 }
+
+
+/* Set r = floor(1/10 * 2^(64 * n) */
+static inline void __one_tenth(uint64_t *r, size_t n) {
+  size_t i;
+  
+  /* If n is zero, do nothing */
+  if (n == ((size_t) 0)) return;
+
+  /* Set high-level word 
+
+     floor(1/10 * 2^64) = 0x1999999999999999
+
+  */
+  r[n - ((size_t) 1)] = (uint64_t) 0x1999999999999999ull;
+  
+  /* If n is one, we are done */
+  if (n == ((size_t) 1)) return;
+
+  /* Here n is at least 2. 
+
+     Set the low level words.
+
+     floor(1/10 * 2^(64 * n)) mod 2^64 = 0x9999999999999999
+
+  */
+  for (i=0;i<n-((size_t) 1);i++) {
+    r[i] = (uint64_t) 0x9999999999999999ull;
+  }
+}
+
+/* Set 
+
+   q = floor(a / 10)
+
+   and 
+
+   r = a - 10 * q
+
+   The size of q and a is n.
+
+   r is guaranteed to be 0 <= r <= 9.
+
+*/
+void divide_by_ten(uint64_t *q, unsigned int *r, const uint64_t *a, size_t n) {
+  uint64_t *one_tenth;
+  uint64_t *nine;
+  uint64_t *t;
+  uint64_t *rr;
+  uint64_t *c;
+  uint64_t *d;
+  uint64_t *e;
+  uint64_t one;
+  int okay;
+  
+  /* If the size is zero, do nothing */
+  if (n == ((size_t) 0)) return;
+
+  /* Set one to 1 */
+  one = (uint64_t) 1;
+  
+  /* Allocate memory for one_tenth on n+2 digits */
+  one_tenth = __alloc_mem(n + ((size_t) 2), sizeof(*one_tenth));
+
+  /* Allocate memory for nine on n digits */
+  nine = __alloc_mem(n, sizeof(*nine));
+  
+  /* Allocate memory for a temporary on n digits */
+  rr = __alloc_mem(n, sizeof(*rr));
+
+  /* Allocate memory for a temporary on n digits */
+  c = __alloc_mem(n, sizeof(*c));
+
+  /* Allocate memory for a temporary on n digits */
+  d = __alloc_mem(n, sizeof(*d));
+
+  /* Allocate memory for a temporary on n digits */
+  e = __alloc_mem(n, sizeof(*e));
+  
+  /* Allocate memory for a temporary on 2 * n + 2 digits */
+  t = __alloc_mem(n + ((size_t) 1), ((size_t) 2) * sizeof(*t));
+
+  /* Load one_tenth = floor(1/10 * 2^(64 * (n + 2))) */
+  __one_tenth(one_tenth, n + ((size_t) 2));
+
+  /* Load nine = 9 */
+  __m_memset(nine, 0, n, sizeof(*nine));
+  nine[0] = (uint64_t) 9;
+
+  /* Multiply a with floor(1/10 * 2^(64 * (n + 2))) */
+  multiplication(t, a, n, one_tenth, n + ((size_t) 2));
+  
+  /* Divide the temporary by 2^(64 * (n + 2)) */
+  __m_memcpy(q, &t[n + ((size_t) 2)], n, sizeof(*q));
+
+  /* Compute, check and correct the remainder */
+  okay = 0;
+  do {
+    /* Multiply q by 10, yielding c */
+    __m_memcpy(d, q, n, sizeof(*c));
+    __m_memcpy(e, q, n, sizeof(*d));
+    shift_left(d, n, 3);
+    shift_left(e, n, 1);
+    addition(c, d, n, e, n);
+
+    /* We need to compute 
+
+       rr = a - c
+
+       We start by checking if c > a.
+
+    */
+    if (comparison(c, a, n) > 0) {
+      /* c > a. This means 10 * q > a.
+
+	 This means q is too great. 
+
+	 Subtract 1 from q.
+
+      */
+      subtraction(c, q, n, &one, (size_t) 1);
+      __m_memcpy(q, c, n, sizeof(*q));
+      okay = 0;
+    } else {
+      /* Here, c <= a. Subtract c from a. */
+      subtraction(rr, a, n, c, n);
+
+      /* We know that 0 <= rr.
+
+	 We need to check if rr <= 9.
+
+      */
+      if (comparison(rr, nine, n) > 0) {
+	/* Here rr = a - c = a - 10 * q > 9 
+	   
+	   This means that q is too small.
+
+	   Add 1 to q.
+
+	*/
+	addition(c, q, n, &one, (size_t) 1);
+	__m_memcpy(q, c, n, sizeof(*q));
+	okay = 0;
+      } else {
+	/* Here, we know that 
+
+	   0 <= rr <= 9.
+
+	   The quotient is hence correct.
+
+	*/
+	okay = 1;
+      }
+    }
+  } while (!okay);
+
+  /* Here, q is already set. Extract r. */
+  *r = (unsigned int) rr[0];
+
+  /* Deallocate temporaries */
+  __free_mem(one_tenth);
+  __free_mem(nine);
+  __free_mem(rr);
+  __free_mem(c);
+  __free_mem(d);
+  __free_mem(e);
+  __free_mem(t);
+}
+
+/* Returns 1 if a is zero. Returns 0 otherwise */
+static inline int __is_zero(const uint64_t *a, size_t n) {
+  size_t i;
+  
+  /* Consider empty values to be zero. */
+  if (n == ((size_t) 0)) return 1;
+
+  /* Check all digits */
+  for (i=0;i<n;i++) {
+    if (a[i] != ((uint64_t) 0)) return 0;
+  }
+
+  /* We survived the loop. Everything is zero. */
+  return 1;
+}
+
+/* str becomes the decimal string corresponding to a.
+
+   str needs to have sufficient length.
+
+*/
+void convert_to_decimal_string(char *str, const uint64_t *a, size_t n) {
+  uint64_t *q;
+  uint64_t *t;
+  unsigned int r;
+  size_t i, k;
+  char c;
+  
+  /* If n is zero, set str to the empty string */
+  if (n == ((size_t) 0)) {
+    str[0] = '\0';
+    return;
+  }
+
+  /* If a is zero, set str to the string "0" */
+  if (__is_zero(a, n)) {
+    str[0] = '0';
+    str[1] = '\0';
+    return;
+  }
+
+  /* a is not zero. 
+
+     Allocate space for two temporaries t and q.
+
+  */
+  t = __alloc_mem(n, sizeof(*t));
+  q = __alloc_mem(n, sizeof(*q));
+
+  /* Copy a into t */
+  __m_memcpy(t, a, n, sizeof(*t));
+
+  /* Loop until t is zero. */
+  i = (size_t) 0;
+  while (!__is_zero(t, n)) {
+    /* Divide t by 10, put quotient into q,
+       remainder into r.
+    */
+    divide_by_ten(q, &r, t, n);
+
+    /* Copy q into t */
+    __m_memcpy(t, q, n, sizeof(*t));
+
+    /* Convert remainder to a digit */
+    str[i] = (char) (((int) r) + ((int) '0'));
+    i++;
+  }
+  /* Set end marker in string */
+  str[i] = '\0';
+
+  /* Reverse string of length i */
+  for (k=0,i--;k<i;k++,i--) {
+    c = str[k];
+    str[k] = str[i];
+    str[i] = c;
+  }
+  
+  /* Free the temporaries */
+  __free_mem(t);
+  __free_mem(q);
+}
+
 
