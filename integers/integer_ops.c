@@ -624,7 +624,38 @@ static inline  void __multiplication_helper_sum(uint64_t *r,
 						size_t n, size_t t,
 						const uint64_t *lo,
 						size_t p) {
-  // TODO
+  uint64_t cin, cout;
+  size_t i;
+  
+  /* Check if we have enough space in r 
+     
+     If we don't, we refuse work.
+
+  */
+  if (q < p) return;
+  if (q < (t + n + ((size_t) 1))) return;
+  if (q < (m + s)) return;
+
+  /* Set r to zero. */
+  __m_memset(r, 0, q, sizeof(*r));
+
+  /* Copy lo into r */
+  __m_memcpy(r, lo, p, sizeof(*r));
+
+  /* Add in mi */
+  cin = (uint64_t) 0;
+  for (i=0;i<n;i++) {
+    __fulladder(&cout, &r[i+t], r[i+t], mi[i], cin);
+    cin = cout;
+  }
+  r[i+t] = cin;
+
+  /* Add in hi */
+  cin = (uint64_t) 0;
+  for (i=0;i<m;i++) {
+    __fulladder(&cout, &r[i+s], r[i+s], hi[i], cin);
+    cin = cout;
+  }  
 }
 
 /* p = a * b
@@ -643,7 +674,119 @@ static inline void __multiplication_square_karatsuba(uint64_t *p,
 						     const uint64_t *a,
 						     const uint64_t *b,
 						     unsigned int k) {
-  // TODO 
+  unsigned int kprime;
+  size_t n;
+  uint64_t *ah;
+  uint64_t *al;
+  uint64_t *bh;
+  uint64_t *bl;
+  uint64_t *s1;
+  uint64_t *s2;
+  uint64_t *t1;
+  uint64_t *t2;
+  uint64_t *t0;
+  uint64_t *t2p;
+  uint64_t *t0p;
+  uint64_t *w;
+  int sign_s1, sign_s2;
+  
+  /* Check for the base case */
+  if (k == ((size_t) 0)) {
+    /* Base case: a and b are on 2^0 = 1 digits */
+    __multiply_digits(&p[1], &p[0], a[0], b[0]);
+    return;
+  }
+
+  /* Here, k >= 1. 
+
+     We cut a and b into two halves each.
+
+  */
+  kprime = k - ((unsigned int) 1);
+
+  /* Allocate memory for ah, al, bh, bl */
+  n = ((size_t) 1) << kprime; /* n = 2^(k - 1) */
+  ah = __alloc_mem(n, sizeof(*ah));
+  al = __alloc_mem(n, sizeof(*al));
+  bh = __alloc_mem(n, sizeof(*bh));
+  bl = __alloc_mem(n, sizeof(*bl));
+
+  /* Cut a into ah and al, b into bh and bl */
+  __m_memcpy(al, a, n, sizeof(*al));
+  __m_memcpy(ah, &a[n], n, sizeof(*ah));
+  __m_memcpy(bl, b, n, sizeof(*bl));
+  __m_memcpy(bh, &b[n], n, sizeof(*bh));
+  
+  /* Allocate memory for s1 and s2 */
+  s1 = __alloc_mem(n, sizeof(*s1));
+  s2 = __alloc_mem(n, sizeof(*s2));
+  
+  /* Compute 
+
+     s1 = ah - al    resp. al - ah
+
+     s2 = bh - bl    resp. bl - bh
+
+  */
+  if (comparison(ah, al, n) >= 0) {
+    sign_s1 = 0;
+    subtraction(s1, ah, n, al, n);
+  } else {
+    sign_s1 = 1;
+    subtraction(s1, al, n, ah, n);
+  }
+  if (comparison(bh, bl, n) >= 0) {
+    sign_s2 = 0;
+    subtraction(s2, bh, n, bl, n);
+  } else {
+    sign_s2 = 1;
+    subtraction(s2, bl, n, bh, n);
+  }
+
+  /* Allocate memory for t0, t1, t2, w */
+  t0 = __alloc_mem(n, ((size_t) 2) * sizeof(*t0));
+  t1 = __alloc_mem(n + ((size_t) 1), ((size_t) 2) * sizeof(*t1));
+  t2 = __alloc_mem(n, ((size_t) 2) * sizeof(*t2));
+  w = __alloc_mem(n, ((size_t) 2) * sizeof(*w));
+  t0p = __alloc_mem(n + ((size_t) 1), ((size_t) 2) * sizeof(*t0p));
+  t2p = __alloc_mem(n + ((size_t) 1), ((size_t) 2) * sizeof(*t2p));
+  
+  /* Execute the 3 recursive calls */
+  __multiplication_square_karatsuba(t0, al, bl, kprime);
+  __multiplication_square_karatsuba(t2, ah, bh, kprime);
+  __multiplication_square_karatsuba(w, s1, s2, kprime);
+
+  /* Deduce t1 out of w, t0, t2, sign_s1 and sign_s2 */
+  __m_memset(t0p, 0, n + ((size_t) 1), ((size_t) 2) * sizeof(*t0p));
+  __m_memset(t2p, 0, n + ((size_t) 1), ((size_t) 2) * sizeof(*t2p));
+  __m_memcpy(t0p, t0, n, ((size_t) 2) * sizeof(*t0p)); /* t0p = t0 */
+  __m_memcpy(t2p, t2, n, ((size_t) 2) * sizeof(*t2p)); /* t2p = t2 */
+  addition(t1, t0p, ((size_t) 2) * n + ((size_t) 2), t2p, ((size_t) 2) * n + ((size_t) 2));
+  if (sign_s1 + sign_s2 == 1) {
+    addition(t1, t1, ((size_t) 2) * n + ((size_t) 2), w, ((size_t) 2) * n);
+  } else {
+    subtraction(t1, t1, ((size_t) 2) * n + ((size_t) 2), w, ((size_t) 2) * n);
+  }
+
+  /* Sum up t2, t1 and t0, all scaled appropriately */
+  __multiplication_helper_sum(p, ((size_t) 1) << (k + ((unsigned int) 1)),
+			      t2, ((size_t) 2) * n, ((size_t) 1) << k,
+			      t1, ((size_t) 2) * n + ((size_t) 2), n,
+			      t0, ((size_t) 2) * n);
+  
+  /* Free the temporaries */
+  __free_mem(ah);
+  __free_mem(al);
+  __free_mem(bh);
+  __free_mem(bl);
+  __free_mem(s1);
+  __free_mem(s2);
+  __free_mem(t0);
+  __free_mem(t0p);
+  __free_mem(t1);
+  __free_mem(t2);
+  __free_mem(t2p);
+  __free_mem(w);
 }
 
 /* Forward declaration */
