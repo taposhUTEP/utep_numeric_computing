@@ -42,6 +42,8 @@ int comparison(const uint64_t *a,
 	       const uint64_t *b,
 	       size_t n);
 
+int is_zero(const uint64_t *a, size_t n);
+
 int convert_from_decimal_string(uint64_t *a, size_t n,
 				const char *str);
 

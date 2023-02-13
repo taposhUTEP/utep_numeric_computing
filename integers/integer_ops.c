@@ -1288,7 +1288,7 @@ void divide_by_ten(uint64_t *q, unsigned int *r, const uint64_t *a, size_t n) {
 }
 
 /* Returns 1 if a is zero. Returns 0 otherwise */
-static inline int __is_zero(const uint64_t *a, size_t n) {
+int is_zero(const uint64_t *a, size_t n) {
   size_t i;
   
   /* Consider empty values to be zero. */
@@ -1322,7 +1322,7 @@ void convert_to_decimal_string(char *str, const uint64_t *a, size_t n) {
   }
 
   /* If a is zero, set str to the string "0" */
-  if (__is_zero(a, n)) {
+  if (is_zero(a, n)) {
     str[0] = '0';
     str[1] = '\0';
     return;
@@ -1341,7 +1341,7 @@ void convert_to_decimal_string(char *str, const uint64_t *a, size_t n) {
 
   /* Loop until t is zero. */
   i = (size_t) 0;
-  while (!__is_zero(t, n)) {
+  while (!is_zero(t, n)) {
     /* Divide t by 10, put quotient into q,
        remainder into r.
     */
