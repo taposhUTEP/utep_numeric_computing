@@ -39,8 +39,10 @@ static void print_array(const char *str, const uint64_t *a, size_t n) {
 }
 
 int test_integers(size_t m, size_t n, const char *str1, const char *str2) {
+  size_t q = (m > n) ? m : n;
   uint64_t a[m];
   uint64_t b[n];
+  uint64_t c[q];
 
   /* Convert the two strings str1 and str2 */
   if (convert_from_decimal_string(a, m, str1) < 0) return -1;
@@ -50,6 +52,12 @@ int test_integers(size_t m, size_t n, const char *str1, const char *str2) {
   print_array("a = ", a, m);
   print_array("b = ", b, n);
 
+  /* Call addition */
+  addition(c, a, m, b, n);
+
+  /* Display the addition result */
+  print_array("c = ", c, q);
+  
   /* TODO */
 
   /* Signal success */
