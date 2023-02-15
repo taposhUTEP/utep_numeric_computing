@@ -5,7 +5,10 @@ all: libutepnum.a
 integers/integer_ops.o: integers/integer_ops.c include/integer_ops.h
 	gcc -Iinclude -Wall -O0 -g -c integers/integer_ops.c -o $@
 
-libutepnum.a: integers/integer_ops.o
+widefloat/widefloat_ops.o: widefloat/widefloat_ops.c include/integer_ops.h include/widefloat_ops.h
+	gcc -Iinclude -Wall -O0 -g -c widefloat/widefloat_ops.c -o $@
+
+libutepnum.a: integers/integer_ops.o widefloat/widefloat_ops.o
 	ar -rv $@ $^
 
 test: tests/test_integers
@@ -21,6 +24,7 @@ tests/test_integers.o: tests/test_integers.c include/utepnum.h
 clean:
 	rm -f libutepnum.a
 	rm -f integers/integer_ops.o
+	rm -f widefloat/widefloat_ops.o
 	rm -f tests/test_integers.o
 	rm -f tests/test_integers
 

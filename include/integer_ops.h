@@ -50,6 +50,7 @@ int convert_from_decimal_string(uint64_t *a, size_t n,
 void convert_to_decimal_string(char *str,
 			       const uint64_t *a, size_t n);
 
+uint64_t leading_zeros(const uint64_t *a, size_t n);
 
 #endif
 

@@ -1369,4 +1369,45 @@ void convert_to_decimal_string(char *str, const uint64_t *a, size_t n) {
   __free_mem(q);
 }
 
+/* Returns the number of leading zero bits in a 64 bit integer.
+
+   If the integer is zero, 64 is returned.
+   
+*/
+static inline uint64_t __leading_zeros_uint64(uint64_t a) {
+  uint64_t res, t;
+  
+  if (a == ((uint64_t) 0)) return (uint64_t) 64;
+
+  res = (uint64_t) 0;
+  for (t=a;
+       (t & (((uint64_t) 1) << 63)) == ((uint64_t) 0);
+       t<<=1) {
+    res++;
+  }
+  return res;
+}
+
+/* Returns the number of leading zero bits in the integer a of size n.
+   
+   If a is zero, 64 * n is returned.
+   If n is zero, 0 is returned.
+
+*/
+uint64_t leading_zeros(const uint64_t *a, size_t n) {
+  uint64_t res;
+  size_t i, k;
+
+  if (n == ((size_t) 0)) return (uint64_t) 0;
+
+  res = (uint64_t) 0;
+  for (i=n-((size_t) 1),k=n;k>0;k--,i--) {
+    if (a[i] != ((uint64_t) 0)) break;
+    res += (uint64_t) 64;
+  }
+  if (k > ((size_t) 0)) {
+    res += __leading_zeros_uint64(a[i]);
+  }
+  return res;
+}
 
