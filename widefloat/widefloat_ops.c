@@ -160,3 +160,196 @@ static inline void __free_mem(void *ptr) {
   free(ptr);
 }
 
+
+/* Functions to (de-)allocate memory for wide floating-point
+   numbers 
+*/
+
+/* Initializes the widefloat_t op to NaN, allocating memory for a
+   mantissa of 64 * n - WIDEFLOAT_OVERHEAD bits of precision.
+   
+   Does nothing if n is zero.
+
+*/
+void widefloat_init(widefloat_t * op, size_t n) {
+  if (n == ((size_t) 0)) return;
+  op->fpclass = FPCLASS_NAN;
+  op->sign = 0;
+  op->exponent = (int32_t) 0;
+  op->mantissa_size = n;
+  op->mantissa = __alloc_mem(n, sizeof(*(op->mantissa)));
+}
+
+
+/* Deallocates the memory in the mantissa of widefloat_t op */
+void widefloat_clear(widefloat_t *op) {
+  op->fpclass = FPCLASS_NAN;
+  op->sign = 0;
+  op->exponent = (int32_t) 0;
+  op->mantissa_size = (size_t) 0;
+  __free_mem(op->mantissa);
+  op->mantissa = NULL;
+}
+
+
+
+/* General rounding function 
+
+   Sets the floating-point number op to the value equal to or in
+   magnitude just below
+
+   (-1)^s * 2^E * m 
+
+   where 
+
+   m is an integer with n digits.
+
+   The floating-point number op must be initialized.
+   
+   Does nothing if op is clearly not initialized.
+   
+   If n is zero, sets op to zero.
+
+   If E is too great, sets op to infinity.
+   If E is too small, sets op to zero.
+
+*/
+void widefloat_set_from_scaled_integer(widefloat_t *op,
+				       int s,
+				       int64_t E,
+				       const uint64_t *m,
+				       size_t n) {
+  uint64_t *t;
+  int64_t EE;
+  size_t q;
+  uint64_t lzc;
+  size_t sigma;
+  int32_t expo;
+  
+  /* Check special cases */
+  if (op->mantissa_size == ((size_t) 0)) return;
+  if (op->mantissa == NULL) return;
+  if (n == ((size_t) 0)) {
+    op->fpclass = FP_CLASS_NUMBER;
+    op->sign = !!s;
+    op->exponent = (int32_t) 0;
+    __m_memset(op->mantissa, 0, op->mantissa_size, sizeof(*(op->mantissa)));
+    return;
+  }
+  if (is_zero(m, n)) {
+    op->fpclass = FP_CLASS_NUMBER;
+    op->sign = !!s;
+    op->exponent = (int32_t) 0;
+    __m_memset(op->mantissa, 0, op->mantissa_size, sizeof(*(op->mantissa)));
+    return;
+  }
+
+  /* Here m has at least one digit and is not zero. The floating-point
+     number is initialized.
+
+     We copy m into a temporary t with size q = n + 1, so that we can
+     normalize it.
+
+  */
+  q = n + ((size_t) 1);
+  t = __alloc_mem(q, sizeof(*t));
+  t[q - ((size_t) 1)] = (uint64_t) 0;
+  __m_memcpy(t, m, n, sizeof(*t));
+
+  /* We get a leading-zero count on t */
+  lzc = leading_zeros(t, q);
+
+  /* We shift t to the left by lzc - WIDEFLOAT_OVERHEAD */
+  sigma = ((size_t) lzc) - ((size_t) WIDEFLOAT_OVERHEAD);
+  shift_left(t, q, sigma);
+
+  /* We adapt EE so that 2^EE * t = 2^E * m */
+  EE = E - ((int64_t) sigma);
+
+  /* We adapt EE to reflect a mantissa between 1 and 2 */
+  EE += ((int64_t) (op->mantissa_size << 6)) -
+    ((int64_t) WIDEFLOAT_OVERHEAD) -
+    ((int64_t) 1);
+
+  /* Now we check if EE holds on a 32 bit signed integer.
+
+     If EE is greater than the greatest 32 bit signed integer, 
+     we produce infinity.
+
+     If EE is less than the smallest 32 bit signed integer, 
+     we produce zero.
+
+  */
+  if (EE > ((int64_t) ((((uint64_t) 1) << 31) - ((uint64_t) 1)))) {
+    /* Produce infinity */
+    if (s) {
+      op->fpclass = FPCLASS_NEG_INF;
+    } else {
+      op->fpclass = FPCLASS_POS_INF;
+    }
+    op->sign = !!s;
+    op->exponent = (int64_t) 0;
+    __m_memset(op->mantissa, 0, op->mantissa_size, sizeof(*(op->mantissa)));
+    __free_mem(t);
+    return;
+  }
+  if (EE < ((-((int64_t) ((((uint64_t) 1) << 31) - ((uint64_t) 1)))) - ((int64_t) 1))) {
+    /* Produce zero */
+    op->fpclass = FP_CLASS_NUMBER;
+    op->sign = !!s;
+    op->exponent = (int32_t) 0;
+    __m_memset(op->mantissa, 0, op->mantissa_size, sizeof(*(op->mantissa)));
+    __free_mem(t);
+    return;
+  }
+
+  /* Now we know that the exponent holds on a 32bit signed integer */
+  expo = (int32_t) EE;
+
+  /* Now we can store the sign, the exponent and the mantissa in 
+     the floating-point number.
+
+     As we do round-to-zero, rounding is just a truncation.
+
+  */
+  op->fpclass = FP_CLASS_NUMBER;
+  op->sign = !!s;
+  op->exponent = expo;
+  if (op->mantissa_size >= q) {
+    /* The mantissa is longer than the temporary t */
+    __m_memset(op->mantissa, 0, op->mantissa_size, sizeof(*(op->mantissa)));
+    __m_memcpy(&(op->mantissa[op->mantissa_size - q]), t,
+	       q, sizeof(*(op->mantissa)));
+  } else {
+    /* The mantissa is shorter than the temporary t */
+    __m_memcpy(op->mantissa, &t[q - op->mantissa_size],
+	       op->mantissa_size, sizeof(*(op->mantissa)));
+  }
+  __free_mem(t);
+}
+
+
+/* Set a floating-point number from an integer
+
+   Sets the floating-point number op to the value equal to or in
+   magnitude just below
+
+   m 
+
+   where 
+
+   m is an integer with n digits.
+
+   The floating-point number op must be initialized.
+   
+   Does nothing if op is clearly not initialized.
+   
+   If n is zero, sets op to zero.
+
+*/
+void widefloat_set_from_integer(widefloat_t *op,
+				const uint64_t *m,
+				size_t n) {
+  widefloat_set_from_scaled_integer(op, 0, (int64_t) 0, m, n);
+}
+

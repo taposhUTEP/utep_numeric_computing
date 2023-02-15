@@ -19,20 +19,35 @@
 #include <stdint.h>
 
 typedef enum {
-  FPCLASS_NAN,
+  FPCLASS_NAN      = 0,
   FPCLASS_POS_INF,
   FPCLASS_NEG_INF,
   FP_CLASS_NUMBER
-} widefpclass_t;
+} widefloatclass_t;
 
 typedef struct {
-  widefpclass_t fpclass;
-  int32_t       exponent;
-  size_t        mantissa_size;
-  uint64_t      *mantissa;
-} widefp_t;
+  widefloatclass_t fpclass;
+  unsigned int     sign:1;
+  int32_t          exponent;
+  size_t           mantissa_size;
+  uint64_t         *mantissa;
+} widefloat_t;
 
+#define WIDEFLOAT_OVERHEAD  ((uint64_t) 11)
 
+void widefloat_init(widefloat_t * op, size_t n);
+
+void widefloat_clear(widefloat_t *op);
+
+void widefloat_set_from_scaled_integer(widefloat_t *op,
+				       int s,
+				       int64_t E,
+				       const uint64_t *m,
+				       size_t n);
+
+void widefloat_set_from_integer(widefloat_t *op,
+				const uint64_t *m,
+				size_t n);
 
 
 #endif
