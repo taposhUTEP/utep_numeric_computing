@@ -47,7 +47,8 @@ int test_integers(size_t m, size_t n, const char *str1, const char *str2) {
   /* Convert the two strings str1 and str2 */
   if (convert_from_decimal_string(a, m, str1) < 0) return -1;
   if (convert_from_decimal_string(b, n, str2) < 0) return -1;
-
+  
+  printf("Testing Addition:\n");
   /* Display the two arrays */
   print_array("a = ", a, m);
   print_array("b = ", b, n);
@@ -59,6 +60,35 @@ int test_integers(size_t m, size_t n, const char *str1, const char *str2) {
   print_array("c = ", c, q);
   
   /* TODO */
+  printf("Testing Multiplication:\n");
+  /* Display the two arrays */
+  print_array("a = ", a, m);
+  print_array("b = ", b, n);
+
+  /* Call multiplication */
+  multiplication(c, a, m, b, n);
+
+  /* Display the multiplication result */
+  print_array("c = ", c, q);
+
+  printf("Testing Subtraction:\n");
+  /* Display the two arrays */
+  print_array("a = ", a, m);
+  print_array("b = ", b, n);
+
+  /* Call Subtraction */
+  subtraction(c, a, m, b, n);
+
+  /* Display the Subtraction result */
+  print_array("c = ", c, q);
+
+  printf("Testing comparision:\n");
+  /* Display the two arrays */
+  print_array("a = ", a, m);
+  print_array("b = ", b, n);
+
+  /* Call comparision and display the comparision result*/
+  printf("comparison result: %d\n", comparison(a, b, q));
 
   /* Signal success */
   return 0;
