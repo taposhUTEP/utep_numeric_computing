@@ -53,10 +53,10 @@ int test_integers(size_t m, size_t n, const char *str1, const char *str2) {
   print_array("b = ", b, n);
 
   /* Call addition */
-  addition(c, a, m, b, n);
+  printf("%d", comparison(a, b, q));
 
   /* Display the addition result */
-  print_array("c = ", c, q);
+  //print_array("c = ", c, q);
   
   /* TODO */
 
